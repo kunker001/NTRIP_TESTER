@@ -1,0 +1,9 @@
+build/bin
+frontend/wailsjs
+*.rtcm3
+
+# Go cache created when %USERPROFILE% is not expanded in GOPATH
+/%USERPROFILE%/
+
+.idea/
+.vscode/

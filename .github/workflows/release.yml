@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-amd64
+            os: windows-latest
+            platform: windows/amd64
+          - name: linux-amd64
+            os: ubuntu-22.04
+            platform: linux/amd64
+          - name: macos-universal
+            os: macos-latest
+            platform: darwin/universal
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Install Wails CLI (same version as go.mod)
+        run: |
+          WAILS_VERSION=$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)
+          echo "Wails $WAILS_VERSION"
+          go install github.com/wailsapp/wails/v2/cmd/wails@"$WAILS_VERSION"
+
+      - name: Test
+        run: go test ./internal/...
+
+      - name: Resolve version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=dev-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        run: wails build -clean -trimpath -platform ${{ matrix.platform }} -ldflags "-X main.version=${VERSION}"
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          PKG="ntrip-tester-${VERSION}-${{ matrix.name }}"
+          case "${{ runner.os }}" in
+            Windows)
+              cp build/bin/ntrip-tester.exe "dist/${PKG}.exe"
+              7z a "dist/${PKG}.zip" ./build/bin/ntrip-tester.exe README.md
+              ;;
+            Linux)
+              tar -czf "dist/${PKG}.tar.gz" -C build/bin ntrip-tester
+              ;;
+            macOS)
+              ditto -c -k --keepParent build/bin/ntrip-tester.app "dist/${PKG}.zip"
+              ;;
+          esac
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

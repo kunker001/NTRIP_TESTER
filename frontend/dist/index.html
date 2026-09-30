@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NTRIP Tester</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">N</div>
+    <div>
+      <div class="title">NTRIP Tester</div>
+      <div class="subtitle">NTRIP 客户端 · RTCM3 数据流分析</div>
+    </div>
+  </div>
+  <div class="state">
+    <span id="stateDot" class="dot idle"></span>
+    <div class="state-texts">
+      <div id="stateText" class="state-text">未连接</div>
+      <div id="stateMsg" class="state-msg"></div>
+    </div>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><label>连接时长</label><b id="kUptime">--</b></div>
+    <div class="kpi"><label>当前码率</label><b id="kBitrate">--</b></div>
+    <div class="kpi"><label>平均 / 峰值</label><b id="kAvg">--</b></div>
+    <div class="kpi"><label>已接收</label><b id="kBytes">--</b></div>
+    <div class="kpi"><label>RTCM 帧</label><b id="kFrames">--</b></div>
+    <div class="kpi"><label>CRC 错误 / 非 RTCM</label><b id="kCrc">--</b></div>
+    <div class="kpi"><label>最后数据</label><b id="kLast">--</b></div>
+    <div class="kpi"><label>估计延迟</label><b id="kLatency">--</b></div>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <section class="panel">
+      <h3>Caster 连接</h3>
+      <div class="row"><label>地址</label><input id="host" placeholder="例如 rtk2go.com" /></div>
+      <div class="row two">
+        <div><label>端口</label><input id="port" type="number" value="2101" /></div>
+        <div><label>协议版本</label>
+          <select id="version"><option value="2.0">NTRIP 2.0</option><option value="1.0">NTRIP 1.0</option></select>
+        </div>
+      </div>
+      <div class="row checks">
+        <label><input type="checkbox" id="tls" /> TLS</label>
+        <label><input type="checkbox" id="selfSign" /> 允许自签名证书</label>
+      </div>
+      <div class="row two">
+        <div><label>用户名</label><input id="username" autocomplete="off" /></div>
+        <div><label>密码</label><input id="password" type="password" autocomplete="off" /></div>
+      </div>
+      <div class="row checks"><label><input type="checkbox" id="savePwd" /> 记住密码（明文保存在本机）</label></div>
+      <div class="row"><label>挂载点</label>
+        <input id="mountpoint" list="mountList" placeholder="先点击“获取源列表”选择" />
+        <datalist id="mountList"></datalist>
+      </div>
+      <div class="btns">
+        <button id="btnTable" class="btn">获取源列表</button>
+        <button id="btnConnect" class="btn primary">连接</button>
+        <button id="btnDisconnect" class="btn danger" disabled>断开</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>GGA 位置上报 / 参考位置</h3>
+      <div class="row two">
+        <div><label>发送间隔</label>
+          <select id="ggaInterval">
+            <option value="0">不发送</option>
+            <option value="1">1 秒</option>
+            <option value="5">5 秒</option>
+            <option value="10" selected>10 秒</option>
+            <option value="30">30 秒</option>
+            <option value="60">60 秒</option>
+          </select>
+        </div>
+        <div><label>数据超时 (秒)</label><input id="timeout" type="number" value="30" /></div>
+      </div>
+      <div class="row two">
+        <div><label>纬度 (°)</label><input id="lat" placeholder="31.2304" /></div>
+        <div><label>经度 (°)</label><input id="lon" placeholder="121.4737" /></div>
+      </div>
+      <div class="row two">
+        <div><label>海拔 (m)</label><input id="alt" placeholder="10" /></div>
+        <div><label>大地水准面差距 (m)</label><input id="sep" placeholder="0" /></div>
+      </div>
+      <div class="btns small">
+        <button id="btnUseArp" class="btn">用基站坐标</button>
+        <button id="btnUseMount" class="btn">用挂载点坐标</button>
+      </div>
+      <div class="hint">VRS / 就近基站类服务需要上报 GGA。该位置同时用于计算挂载点距离和到基站的基线长度。</div>
+    </section>
+
+    <section class="panel">
+      <h3>选项</h3>
+      <div class="row checks"><label><input type="checkbox" id="autoReconnect" checked /> 断线自动重连（5 秒）</label></div>
+      <div class="btns small">
+        <button id="btnRecord" class="btn">记录原始数据</button>
+        <button id="btnReset" class="btn">清空统计</button>
+      </div>
+      <div id="recordInfo" class="hint"></div>
+    </section>
+
+    <section class="panel grow">
+      <h3>事件日志 <button id="btnClearLog" class="link">清空</button></h3>
+      <div id="eventLog" class="eventlog"></div>
+    </section>
+  </aside>
+
+  <main class="main">
+    <nav class="tabs">
+      <button class="tab active" data-tab="overview">概览</button>
+      <button class="tab" data-tab="messages">消息统计</button>
+      <button class="tab" data-tab="signals">卫星信号</button>
+      <button class="tab" data-tab="sourcetable">源列表</button>
+      <button class="tab" data-tab="console">数据控制台</button>
+    </nav>
+
+    <section id="tab-overview" class="page active">
+      <div class="grid g2">
+        <div class="card">
+          <div class="card-h">数据码率 <span class="muted">kbps · 最近 5 分钟</span></div>
+          <canvas id="cvBitrate" class="chart h200"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-h">消息字节占比</div>
+          <canvas id="cvDonut" class="chart h200"></canvas>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h">消息到达时间线 <span class="muted">每格 1 秒 · 最近 2 分钟 · 右侧为 10 秒平均频率</span></div>
+        <canvas id="cvTimeline" class="chart"></canvas>
+      </div>
+      <div class="grid g2">
+        <div class="card">
+          <div class="card-h">基准站信息</div>
+          <div id="stationBox"></div>
+        </div>
+        <div class="card">
+          <div class="card-h">星座概况</div>
+          <div id="sysBox" class="sys-grid"></div>
+        </div>
+      </div>
+      <div class="card" id="textCard" hidden>
+        <div class="card-h">文本消息 (1029)</div>
+        <div id="textBox" class="texts"></div>
+      </div>
+    </section>
+
+    <section id="tab-messages" class="page">
+      <div class="card">
+        <table class="tbl" id="msgTable"><thead></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <section id="tab-signals" class="page">
+      <div class="card">
+        <div class="card-h">载噪比 C/N0 <span class="muted">dB-Hz · 每颗卫星的各频点</span>
+          <select id="sysFilter"></select>
+          <span id="cnrSummary" class="muted"></span>
+        </div>
+        <div class="hscroll"><canvas id="cvCnr" class="chart h260"></canvas></div>
+      </div>
+      <div class="grid g2">
+        <div class="card">
+          <div class="card-h">观测卫星数 <span class="muted">最近 5 分钟</span></div>
+          <canvas id="cvSatHist" class="chart h200"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-h">星历覆盖 <span class="muted">悬停查看详情，灰色表示超过 10 分钟未更新</span></div>
+          <div id="ephBox"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-sourcetable" class="page">
+      <div class="card">
+        <div class="card-h">挂载点
+          <input id="stFilter" placeholder="筛选：名称 / 格式 / 国家 / 网络" />
+          <span id="stCount" class="muted"></span>
+          <span class="muted">单击选择，双击连接</span>
+        </div>
+        <div class="st-wrap">
+          <div class="st-table"><table class="tbl" id="stTable"><thead></thead><tbody></tbody></table></div>
+          <canvas id="cvMap" class="chart map"></canvas>
+        </div>
+      </div>
+      <details class="card"><summary>原始源列表</summary><pre id="stRaw"></pre></details>
+    </section>
+
+    <section id="tab-console" class="page">
+      <div class="card console-card">
+        <div class="card-h">
+          <label><input type="checkbox" id="cPause" /> 暂停</label>
+          <label><input type="checkbox" id="cHex" /> 显示十六进制</label>
+          <input id="cFilter" placeholder="过滤：消息号或关键字，如 1077 / MSM / 1005" />
+          <button id="cClear" class="btn">清空</button>
+          <span id="cInfo" class="muted"></span>
+        </div>
+        <div id="consoleBox" class="console"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="charts.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
